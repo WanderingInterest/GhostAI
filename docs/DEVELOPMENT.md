@@ -138,14 +138,28 @@ This command explicitly overrides emulator mode, even if an old `.env.local` ena
 it. New accounts now appear in the live Firebase Auth console and verification/reset
 emails use Firebase’s real email service. The local demo accounts do not transfer.
 
-## Vercel later
+## Vercel deployment
 
 - Root Directory: `apps/admin-web`; Framework: Next.js; Node: 24.
+- Enable **Include source files outside of the Root Directory in the Build Step**.
+  The public messaging policy JSON is shared with the Functions workspace.
+- The checked-in frontend `vercel.json` installs with `npm ci --include=dev` and builds
+  only Next.js with emulator mode disabled. Clear any dashboard override that builds
+  from the repository root; the root build also compiles Firebase Functions.
+- TypeScript and React/Node type packages are declared directly in the frontend
+  workspace, so a Vercel workspace install includes the compiler required by Next.js.
+- Both package manifests pin Node to `24.x`. The old open-ended `>=24.12.0`
+  range allowed Vercel to select Node 26, which caused dependency engine warnings.
 - Environment: `NEXT_PUBLIC_USE_EMULATORS=false` and
   `NEXT_PUBLIC_FUNCTIONS_REGION=us-central1`.
 - Add the final domain in Firebase Auth → Settings → Authorized domains.
 - Add the exact HTTPS origin to `GHOSTAI_ALLOWED_ORIGINS` and redeploy the backend.
 - No server credentials or vault key are needed in Vercel.
+
+The `EBADENGINE` and npm `cache-dir` warnings do not by themselves identify a failed
+build. If deployment still fails, inspect the final `Error`/`npm error` lines and the
+exit status. The first deployment after changing these settings should use the latest
+commit and a fresh build cache.
 
 For live localhost auth links, add `localhost` and `127.0.0.1` to Firebase Auth’s
 Authorized domains if absent. A successful signup sends a verification email;

@@ -1,103 +1,148 @@
-# Public policies and SMS consent
+# SMS: assisted company onboarding
 
-The public pages are ready in the Next.js app:
+Each company brings its own Twilio account and SMS-capable number. GhostAI operators
+connect it during customer onboarding. The app shows connection status and the number;
+company owners can enter customer Twilio details in **Connections → Text messaging** during assisted onboarding. Technicians never see these settings. OpenAI remains a separate
+connection. No credentials or numbers have been configured by this change.
 
-| Path | Purpose |
-| --- | --- |
-| `/privacy` | Privacy policy, including SMS opt-in data and service providers |
-| `/terms` | Terms & Conditions, with the SMS program at `#sms` |
-| `/sms` | The real technician self-service opt-in and withdrawal form |
-| `/sms/consent-proof` | Public explanation of that flow and exact disclosure |
-| `/support` | Support and privacy request contact instructions |
+## In-app assisted setup
 
-These pages require no sign-in to read. Saving a preference requires the user's own
-verified Firebase identity and active company membership. Account creation and use
-of the web app do not require SMS consent. Owners cannot opt in for a technician.
+Sign in as a company owner and open **Connections → Text messaging**. Enter the
+Twilio business number, Account SID, Auth Token, business sender name and support
+email. Check the approval confirmation only when sender registration is approved;
+leave it unchecked to save a pending connection with messaging off. Save verifies
+number ownership and configures the inbound webhook. Setup requires recent sign-in.
+Credentials are encrypted and never returned to the browser. Use **Update connection**
+to rotate credentials or confirm approval, and **Disconnect** before changing number.
+The form is disabled in emulator previews.
 
-## Before publishing
+Deploy the backend with `npm run deploy:backend` and deploy the updated frontend to
+Vercel before using this form. Operator CLI setup below remains available as an alternative.
 
-The operator currently reads **Wandering Interest**, with **GhostAI Technician
-Assistant** as the program and **GhostAI by Wandering Interest** as the sender.
-Confirm that this matches the business identity submitted for this Twilio number.
-Set the actual support contact and assigned Twilio number in the frontend's Vercel
-environment, then build/deploy the frontend:
+## Operator CLI setup
 
-```text
-NEXT_PUBLIC_SUPPORT_EMAIL=<your monitored support email>
-NEXT_PUBLIC_SMS_NUMBER=<your assigned toll-free number>
+1. Deploy the backend with `npm run deploy:backend`. This now includes `api`,
+   `twilioWebhook`, `smsIncoming`, and `smsOutgoing`, plus Firestore rules/indexes.
+   Firestore triggers use Eventarc; the Firebase deployment must enable its APIs and
+   service-agent permissions. First-time provisioning can require a deployment retry.
+2. Deploy the frontend to Vercel. Primary URL: `https://www.ghostai.dev`.
+3. Use operator Application Default Credentials with access to this project's
+   Firestore and Secret Manager. For local operator setup, use
+   `gcloud auth application-default login`. Never put operator credentials in the browser.
+4. Obtain the company's ID from Firestore `organizations/{companyId}` and securely
+   collect its Twilio Account SID, Auth Token, and business number. The Auth Token
+   authenticates provider requests and validates incoming signatures; a number alone
+   is insufficient. Dedicated customer accounts/subaccounts are preferred.
+5. Create a private JSON file outside the repository, `chmod 600` it, and fill in:
+
+```json
+{
+  "accountSid": "AC...",
+  "authToken": "...",
+  "phone": "+16025550123",
+  "sender": "Customer Business Name",
+  "supportEmail": "support@customer.example",
+  "approvedForMessaging": false
+}
 ```
 
-The support page explicitly identifies an unset contact as being prepared for launch;
-replace that state before submitting verification. No support mailbox or business
-identity has been invented. Review the policy copy against actual business practices
-and any separate commercial agreements before publishing.
+6. Run `npm run setup:twilio -- COMPANY_ID /absolute/path/private-twilio.json`.
+   This validates number ownership and SMS capability, encrypts credentials using the
+   existing vault key with tenant/provider binding, reserves the account/number for
+   this company, and configures its inbound POST webhook. It prints no secrets.
+   Remove the private input file after secure handoff/storage is complete.
+7. After confirming the actual sender registration/verification is approved for the
+   intended destination/use case, rerun with `approvedForMessaging: true`. This flag is
+   an explicit operator attestation, **not an automated provider compliance check**.
+   Failed provider configuration leaves messaging disabled. Verify Twilio's configured
+   webhook is the URL printed by the command; avoid alternate Cloud Run URLs, proxy
+   rewrites, query strings, and trailing slashes because signatures bind the exact URL.
+8. Verify the company's legal sender, support contact, privacy/terms coverage, and
+   consent evidence match its Twilio submission. If Advanced Opt-Out is enabled,
+   configure its HELP response with the same sender/support information. Twilio
+   normally handles STOP confirmation; GhostAI also records withdrawal and blocks
+   future actions/sends. START never restores GhostAI consent by itself.
 
-Deploy the updated Functions using `npm run deploy:backend` yourself. Add the exact
-frontend origin to backend CORS and the required Firebase Auth authorized domains.
-Local preferences are emulator data and are not live consent records. No deployment
-or Twilio submission has been performed by the agent.
+Only public connection metadata is exposed to company owners. Credentials have no
+read-back endpoint. Setup and disconnect are audited. To change a number/account,
+first disconnect through the owner-authenticated API (`POST
+/orgs/{companyId}/connections/twilio/disconnect`, `{}`; recent sign-in required), then
+rerun operator setup. Remove obsolete webhook configuration in the old Twilio account.
+The server rejects callbacks after disconnect, and queued messages cannot use the
+removed credentials. Credential rotation on the same account/number uses the same
+setup command. Replacing configuration invalidates messages queued under the old
+connection generation.
 
-## Verification submission
+## Technician enrollment
 
-After hosting, use URLs on your actual domain:
+The technician signs in, verifies their email, and joins their company. From account
+SMS preferences (`/sms?company=COMPANY_ID`), they enter their own phone, read the
+company's sender-specific disclosure, and select the initially unchecked optional
+consent box. They then choose **Verify my phone**, which displays a one-time LINK
+message and the company's number, with a mobile SMS link. Sending that exact message
+from the consented phone proves ownership. Codes expire after ten minutes, are stored
+as hashes, and are bound to the user's current consent revision and phone. A new code
+invalidates the previous one. “I sent it — check status” confirms enrollment.
 
-- Privacy Policy: `https://<your-domain>/privacy`
-- Terms & Conditions: `https://<your-domain>/terms`
-- Opt-in form: `https://<your-domain>/sms`
-- Documented consent process: `https://<your-domain>/sms/consent-proof`
+The company sender, support email and number determine the versioned disclosure.
+Changing any of those requires fresh consent and verification. Old pilot consent
+cannot enable a different company's messaging program. Owners cannot opt in for
+technicians. Consent is optional and has no effect on web access.
 
-The proof page links to the actual form; it is not a fabricated record of consent
-or an assertion of Twilio approval. If the reviewer requests an image, capture the
-actual `/sms` form with its checkbox unchecked and all disclosure/policy links visible,
-host that image publicly, and submit its URL. Use blank or redacted personal fields.
-No private consent records should be published.
+The public `/privacy`, `/terms`, `/support`, `/sms`, and `/sms/consent-proof` pages
+remain available. The proof page describes the process and pilot disclosure; it
+never publishes private evidence or claims provider approval. Actual authenticated
+forms display the selected company's disclosure. Keep public pilot contact settings
+`NEXT_PUBLIC_SUPPORT_EMAIL` and `NEXT_PUBLIC_SMS_NUMBER` accurate before using them
+in a GhostAI pilot verification submission.
 
-Suggested use-case description, if it accurately describes your intended program:
+## Runtime and controls
 
-> Internal SMS assistant for enrolled service technicians. Technicians request job
-> information, record service notes, and request repairs. Replies contain requested
-> information, saved-action confirmations, and approval status. No marketing or
-> unsolicited customer outreach.
+- Signed inbound URL: `https://us-central1-ghostai-794c5.cloudfunctions.net/twilioWebhook/COMPANY_ID/inbound`.
+  The SDK verifies all received form parameters against the canonical URL and the
+  tenant's Auth Token. Account SID and destination must also match. No host header,
+  model output, or sender-supplied tenant identifier determines routing.
+- Incoming provider Message SIDs are durable idempotency keys in `smsInbox`.
+  Firestore creation triggers process messages asynchronously, acknowledging the
+  webhook before model work. Unknown/unverified senders cannot reach the assistant.
+  HELP provides sender/support information without exposing business data. Duplicate
+  requests cannot repeat actions. Only text is processed; no attachment/voice support.
+- The existing Executive runtime uses the current user's scoped tools, membership,
+  account status, action receipts and quotas. SMS additionally checks current consent,
+  verified phone binding and connection generation before every tool and response.
+  Conversations are separate per user/company/enrollment/connection. Pending approval
+  actions remain pending and must be approved in the portal.
+- Replies enter `smsOutbox`; dispatch rechecks account, membership, consent and
+  connection before Twilio. Automatic provider retries are off. A timeout or crash
+  after claiming a send is never blindly resent. Signed status callbacks persist
+  provider SID and delivery/failure state. Provider acceptance is not delivery.
+- STOP updates an immutable withdrawal event and blocks the phone, including while
+  a connection is paused. Web withdrawal/re-enrollment invalidates queued requests
+  through consent revisions. After STOP, a new web opt-in and phone verification are
+  required (and the recipient may need START to clear Twilio's independent block).
+- Keep SMS concise; replies are capped at 1,400 characters and may span multiple
+  billed segments. Input is limited to 2,000 characters. No marketing, unsolicited
+  customer outreach, automatic approval notifications or delivery retries are built.
 
-Do not claim STOP/HELP webhooks or phone verification are already live. The published
-proof page accurately distinguishes the implemented consent flow from pending SMS
-transport work. Provider approval is determined by Twilio, not by these pages.
+## Operations and critical validation
 
-## Consent record and integration boundary
+Inspect company `smsInbox`/`smsOutbox` records for failed or stuck work. `processing`,
+`sending`, or `unknown` after an interrupted invocation requires manual reconciliation
+against assistant turn receipts and Twilio logs. **Do not reset these to queued or
+replay CRM writes.** Use the saved receipts to determine what committed and the Twilio
+message/callback records to determine delivery. Durable storage makes failures
+inspectable; this prototype does not yet include an operator recovery dashboard,
+automated recovery, conversation retention jobs, or number-reassignment automation.
+A phone can belong to only one account within a company until an operator reviews and
+removes the old binding; phone possession alone must not transfer historical access.
 
-The backend endpoint is `GET/POST /orgs/{tenant}/messaging-consent`. A POST accepts
-only an `opt_in` with an affirmative checkbox, current policy version, own phone,
-idempotency key and expected revision, or a `withdraw` with the key and revision.
-The identity always comes from the bearer token; there is no target-user field.
+Critical emulator checks cover signature rejection, tenant isolation, current disclosure,
+phone ownership, duplicate action/send prevention, STOP suppression, START behavior,
+HELP and callback recipient binding. They use injected provider/model boundaries and
+send no real SMS or paid model calls. After actual onboarding, perform one live
+technician job lookup/note and STOP check with the approved number before launch.
 
-Current preference: `organizations/{tenant}/messagingConsents/{uid}`.
-Immutable events: `.../messagingConsents/{uid}/events/{requestKey}`.
-
-Events retain authenticated actor/company, phone, server timestamp, source path and
-request origin, exact disclosure, privacy/terms versions and paths, affirmative
-checkbox state, and subsequent withdrawal. Replay does not restore withdrawn consent;
-revision checks prevent a stale request from overwriting a newer choice. Browser
-Firestore access remains denied.
-
-The canonical public consent text/version is `functions/src/messaging-policy.json`,
-imported by the backend and frontend. This file contains public copy only. Update
-and version it deliberately when disclosures change.
-
-A saved preference is **consented_pending_verification**, with `phoneVerified=false`
-and `smsEnabled=false`. It is not an enrolled, verified phone identity. The later
-Twilio adapter must verify number ownership, bind it to the correct account and
-company, implement signed webhooks and STOP/HELP, and check current consent both
-when queueing and immediately before outbound dispatch. Withdrawing here must also
-block future queued messages once that adapter exists.
-
-This initial program identifies GhostAI/Wandering Interest as the sender. Future
-customer-owned Twilio programs need tenant-specific sender identity, number, approved
-use case and matched consent/policy versions before activation; this consent must
-not be reused as blanket permission for unrelated businesses or marketing.
-
-## References checked
-
-- [Twilio toll-free onboarding](https://help.twilio.com/hc/en-us/articles/13264118705051-Required-Information-for-Toll-Free-Verification)
-- [Explicit SMS disclosure](https://www.twilio.com/docs/api/errors/30551)
-- [Direct end-user consent](https://www.twilio.com/docs/api/errors/30552)
-- [Optional opt-in](https://www.twilio.com/docs/api/errors/30505)
+References: [Twilio security](https://www.twilio.com/docs/usage/security),
+[Message API and callbacks](https://www.twilio.com/docs/messaging/api/message-resource),
+[toll-free verification](https://www.twilio.com/docs/api/errors/30032),
+[A2P 10DLC](https://www.twilio.com/docs/messaging/compliance/a2p-10dlc).

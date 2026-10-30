@@ -48,8 +48,9 @@ export default function ConsentProofPage() {
           </li>
           <li>
             The authenticated backend records their choice and the policy
-            version. Phone ownership remains unverified; consent alone cannot
-            activate messaging.
+            version. They then verify phone ownership by sending a one-time LINK
+            message from that phone to their company’s connected number. Consent
+            alone cannot activate messaging.
           </li>
         </ol>
         <p>
@@ -84,11 +85,11 @@ export default function ConsentProofPage() {
         <h2>Withdrawal and messaging readiness</h2>
         <p>
           Technicians can withdraw in SMS preferences without losing their web
-          account. STOP and HELP processing, phone verification, signed Twilio
-          webhooks, and outbound dispatch are separate messaging integration
-          work. Live SMS must remain disabled until those controls and number
-          verification are complete. This page does not claim they are already
-          active.
+          account, or text STOP to their company’s number. HELP provides program
+          support. Messaging is enabled only after assisted company setup,
+          sender approval, voluntary consent, and phone verification. Each
+          company’s signed-in form displays its configured sender and exact
+          disclosure; the example above describes the GhostAI pilot program.
         </p>
       </section>
       <section>

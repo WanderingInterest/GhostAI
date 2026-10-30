@@ -2,8 +2,7 @@
 
 The Executive is one OpenAI Agents SDK agent running inside the TypeScript backend.
 The web Assistant is its first channel. It operates on the demo CRM and native notes
-through the same Gateway used by the portal. SMS, voice and external CRM adapters
-are later integration work, not required to use the local assistant.
+through the same Gateway used by the portal. The SMS channel now invokes this same runtime with verified phone enrollment and an additional consent/connection guard before every tool and reply. See [SMS onboarding](TWILIO_SETUP.md). Voice and external CRM adapters remain future work.
 
 ## Local use
 
@@ -163,7 +162,7 @@ because of billing, model access or restricted endpoint permissions.
    claim/fence durable work, reconcile uncertain outcomes, then produce receipts.
    Never place a remote side effect in a retryable transaction. Preserve the existing
    owner approval boundary rather than adding model-accessible approval tools.
-4. **SMS:** a channel adapter must verify Twilio signature/account/destination,
+4. **SMS (implemented):** the channel adapter verifies Twilio signature/account/destination,
    deduplicate MessageSid, resolve the enrolled user and assurance, enforce consent
    and STOP, then invoke the same Executive. Extend trusted channel context and
    conversation namespacing explicitly; do not forge Firebase sessions from phone
@@ -181,8 +180,7 @@ queued execution rather than extending HTTP timeouts indefinitely.
 
 ## Deployment
 
-The owner previously deployed the account/CRM backend. This Executive change still
-requires the owner to run `npm run deploy:backend` for live use. The local demo needs
+The Executive backend is deployed. The new SMS functions require a fresh `npm run deploy:backend` and assisted Twilio setup before live texting. The local demo needs
 no cloud deployment. Live calls use each company's encrypted saved key, never the
 local development fallback. Frontend Vercel hosting remains owner-managed.
 

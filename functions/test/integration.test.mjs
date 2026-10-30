@@ -128,7 +128,9 @@ before(async () => {
     projectId: "demo-ghostai",
     firestore: {
       host: "127.0.0.1",
-      port: 8080,
+      port: Number(
+        process.env.FIRESTORE_EMULATOR_HOST?.split(":").at(-1) ?? 8080,
+      ),
       rules: await readFile("firestore.rules", "utf8"),
     },
   });
@@ -1178,4 +1180,327 @@ test("Executive full CRM enforces isolation duplicates revisions and reversible 
     ),
   );
   await archive("notes", note.recordId, 3, false);
+});
+
+test("SMS transport validates signatures, binds phone consent, deduplicates actions, and suppresses opt-out delivery", async () => {
+  const { Sms, smsPolicy } = require("../lib/sms.js");
+  const { MessagingConsent } = require("../lib/messaging.js");
+  const { encryptKey } = require("../lib/credentials.js");
+  const twilio = require("twilio");
+  const f = await fixture();
+  const master = Buffer.alloc(32, 9).toString("base64");
+  const config = {
+    accountSid: `AC${"a".repeat(32)}`,
+    authToken: "b".repeat(32),
+    phone: "+16025550101",
+    sender: "Fixture Service",
+    supportEmail: "support@example.test",
+  };
+  let turns = 0,
+    sends = 0;
+  const runtime = {
+    turn: async (identity, tenant, input, guard) => {
+      await guard();
+      turns++;
+      assert.equal(identity.uid, f.tech.uid);
+      assert.equal(tenant, f.tenant);
+      return {
+        turns: [
+          { id: input.turnId, reply: "Fixture job answer", receipts: [] },
+        ],
+      };
+    },
+  };
+  const provider = () => ({
+    messages: {
+      create: async () => {
+        sends++;
+        return { sid: `SM${"e".repeat(32)}` };
+      },
+    },
+  });
+  const sms = new Sms(service, () => master, runtime, provider);
+  await sms.connection(f.tenant).set({
+    ...config,
+    authToken: null,
+    sealed: encryptKey(JSON.stringify(config), master, f.tenant, "twilio"),
+    enabled: true,
+    generation: "fixture-generation",
+  });
+  await sms
+    .program(f.tenant)
+    .set({ ...config, authToken: null, enabled: true });
+  const consents = new MessagingConsent(service);
+  const p = smsPolicy(config);
+  await assert.rejects(() =>
+    consents.save(
+      f.tech,
+      f.tenant,
+      {
+        action: "opt_in",
+        key: unique(),
+        phone: "+16025550102",
+        version: "old-policy",
+        agreed: true,
+        expectedRevision: 0,
+      },
+      null,
+    ),
+  );
+  await consents.save(
+    f.tech,
+    f.tenant,
+    {
+      action: "opt_in",
+      key: unique(),
+      phone: "+16025550102",
+      version: p.version,
+      agreed: true,
+      expectedRevision: 0,
+    },
+    null,
+  );
+  const challenge = await sms.verification(f.tech, f.tenant);
+  let sequence = 0;
+  const params = (body) => ({
+    AccountSid: config.accountSid,
+    To: config.phone,
+    From: "+16025550102",
+    MessageSid: `SM${(++sequence).toString(16).padStart(32, "0")}`,
+    Body: body,
+  });
+  const signature = (data, tenant = f.tenant) =>
+    twilio.getExpectedTwilioSignature(config.authToken, sms.url(tenant), data);
+  const link = params(challenge.text);
+  await assert.rejects(() => sms.inbound(f.tenant, link, "forged"));
+  await assert.rejects(() => sms.inbound(f.otherTenant, link, signature(link)));
+  await sms.inbound(f.tenant, link, signature(link));
+  await sms.process(f.tenant, link.MessageSid);
+  assert.equal((await consents.status(f.tech, f.tenant)).smsEnabled, true);
+  const request = params("What is my assigned job?");
+  await sms.inbound(f.tenant, request, signature(request));
+  await sms.inbound(f.tenant, request, signature(request));
+  await sms.process(f.tenant, request.MessageSid);
+  await sms.process(f.tenant, request.MessageSid);
+  assert.equal(turns, 1);
+  await sms.dispatch(f.tenant, request.MessageSid);
+  await sms.dispatch(f.tenant, request.MessageSid);
+  assert.equal(sends, 1);
+  const second = params("Save a service note");
+  await sms.inbound(f.tenant, second, signature(second));
+  await sms.process(f.tenant, second.MessageSid);
+  const stop = params("STOP");
+  await sms.inbound(f.tenant, stop, signature(stop));
+  await sms.dispatch(f.tenant, second.MessageSid);
+  assert.equal(sends, 1);
+  assert.equal((await consents.status(f.tech, f.tenant)).status, "withdrawn");
+  assert.equal(
+    (
+      await service
+        .org(f.tenant)
+        .collection("smsOutbox")
+        .doc(second.MessageSid)
+        .get()
+    ).data().status,
+    "suppressed",
+  );
+  const help = params("HELP");
+  assert.match(
+    await sms.inbound(f.tenant, help, signature(help)),
+    /support@example.test/,
+  );
+  const start = params("START");
+  await sms.inbound(f.tenant, start, signature(start));
+  assert.equal((await consents.status(f.tech, f.tenant)).smsEnabled, false);
+  // Fresh web consent + ownership verification is required after STOP.
+  await consents.save(
+    f.tech,
+    f.tenant,
+    {
+      action: "opt_in",
+      key: unique(),
+      phone: request.From,
+      version: p.version,
+      agreed: true,
+      expectedRevision: 2,
+    },
+    null,
+  );
+  const renewed = await sms.verification(f.tech, f.tenant);
+  const relink = params(renewed.text);
+  await sms.inbound(f.tenant, relink, signature(relink));
+  await sms.process(f.tenant, relink.MessageSid);
+  assert.equal((await consents.status(f.tech, f.tenant)).smsEnabled, true);
+  const uncertain = params("What is next?");
+  await sms.inbound(f.tenant, uncertain, signature(uncertain));
+  await sms.process(f.tenant, uncertain.MessageSid);
+  let attempts = 0;
+  const failing = new Sms(
+    service,
+    () => master,
+    runtime,
+    () => ({
+      messages: {
+        create: async () => {
+          attempts++;
+          throw new Error("Timeout after possible acceptance");
+        },
+      },
+    }),
+  );
+  await failing.dispatch(f.tenant, uncertain.MessageSid);
+  await failing.dispatch(f.tenant, uncertain.MessageSid);
+  assert.equal(attempts, 1);
+  assert.equal(
+    (
+      await service
+        .org(f.tenant)
+        .collection("smsOutbox")
+        .doc(uncertain.MessageSid)
+        .get()
+    ).data().status,
+    "unknown",
+  );
+  const staleReply = params("Show my job address");
+  await sms.inbound(f.tenant, staleReply, signature(staleReply));
+  await sms.process(f.tenant, staleReply.MessageSid);
+  const memberRef = service.org(f.tenant).collection("members").doc(f.tech.uid);
+  const currentMember = (await memberRef.get()).data();
+  await memberRef.update({
+    version: currentMember.version + 1,
+    permissions: {},
+  });
+  await sms.dispatch(f.tenant, staleReply.MessageSid);
+  assert.equal(sends, 1);
+  assert.equal(
+    (
+      await service
+        .org(f.tenant)
+        .collection("smsOutbox")
+        .doc(staleReply.MessageSid)
+        .get()
+    ).data().status,
+    "suppressed",
+  );
+  const revoked = params("Show the next job");
+  await sms.inbound(f.tenant, revoked, signature(revoked));
+  const beforeRevocation = turns;
+  await service
+    .org(f.tenant)
+    .collection("members")
+    .doc(f.tech.uid)
+    .update({ active: false });
+  await sms.process(f.tenant, revoked.MessageSid);
+  assert.equal(turns, beforeRevocation);
+  // Even valid callbacks cannot alter a different message/recipient.
+  const callback = {
+    AccountSid: config.accountSid,
+    From: config.phone,
+    To: request.From,
+    MessageSid: `SM${"e".repeat(32)}`,
+    MessageStatus: "delivered",
+  };
+  const callbackSignature = twilio.getExpectedTwilioSignature(
+    config.authToken,
+    sms.url(f.tenant, "status", request.MessageSid),
+    callback,
+  );
+  await sms.callback(f.tenant, request.MessageSid, callback, callbackSignature);
+  assert.equal(
+    (
+      await service
+        .org(f.tenant)
+        .collection("smsOutbox")
+        .doc(request.MessageSid)
+        .get()
+    ).data().status,
+    "delivered",
+  );
+  const changed = { ...callback, To: "+16025550999" };
+  await assert.rejects(() =>
+    sms.callback(
+      f.tenant,
+      request.MessageSid,
+      changed,
+      twilio.getExpectedTwilioSignature(
+        config.authToken,
+        sms.url(f.tenant, "status", request.MessageSid),
+        changed,
+      ),
+    ),
+  );
+});
+
+test("Twilio onboarding accepts only recent company owners and never exposes credentials", async () => {
+  const { Sms } = require("../lib/sms.js");
+  const f = await fixture();
+  const master = Buffer.alloc(32, 7).toString("base64");
+  const input = {
+    accountSid: `AC${"1".repeat(32)}`,
+    authToken: "2".repeat(32),
+    phone: "+16025550333",
+    sender: "Test Onboarding",
+    supportEmail: "support@example.test",
+    approvedForMessaging: true,
+  };
+  let configured = 0;
+  const numbers = () => ({
+    update: async (data) => {
+      assert.equal(data.smsMethod, "POST");
+      configured++;
+    },
+  });
+  numbers.list = async () => [
+    { sid: `PN${"3".repeat(32)}`, capabilities: { sms: true } },
+  ];
+  const sms = new Sms(
+    service,
+    () => master,
+    undefined,
+    () => ({ incomingPhoneNumbers: numbers }),
+  );
+  await assert.rejects(() => sms.connect(f.tech, f.tenant, input));
+  await assert.rejects(() => sms.connect(f.other, f.tenant, input));
+  await assert.rejects(() =>
+    sms.connect({ ...f.owner, authTime: 0 }, f.tenant, input),
+  );
+  assert.equal(configured, 0);
+  const result = await sms.connect(f.owner, f.tenant, input);
+  assert.equal(result.status, "connected");
+  assert.equal(result.phone, input.phone);
+  assert.equal(JSON.stringify(result).includes(input.authToken), false);
+  const stored = (await sms.connection(f.tenant).get()).data();
+  assert.ok(stored.sealed);
+  assert.equal(stored.authToken, undefined);
+  await assert.rejects(
+    () => sms.connect(f.other, f.otherTenant, input),
+    /already assigned/,
+  );
+  assert.equal(configured, 1);
+  const broken = new Sms(
+    service,
+    () => master,
+    undefined,
+    () => {
+      throw new Error(input.authToken);
+    },
+  );
+  await assert.rejects(
+    () => broken.connect(f.owner, f.tenant, input),
+    (error) => error.status === 502 && !error.message.includes(input.authToken),
+  );
+  const revoking = () => ({
+    update: async () => {
+      await service.member(f.tenant, f.owner.uid).update({ active: false });
+    },
+  });
+  revoking.list = numbers.list;
+  const race = new Sms(
+    service,
+    () => master,
+    undefined,
+    () => ({ incomingPhoneNumbers: revoking }),
+  );
+  await assert.rejects(() => race.connect(f.owner, f.tenant, input));
+  assert.equal((await sms.connection(f.tenant).get()).data().enabled, false);
 });

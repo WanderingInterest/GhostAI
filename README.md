@@ -4,7 +4,7 @@
 
 GhostAI is a hosted, multi-tenant intelligence and integration layer for small service businesses. A company brings its own communications provider, OpenAI API project, and optional business software accounts. Workers interact through normal calls and SMS/MMS; GhostAI executes bounded, authorized actions and reports verified results. The admin portal is for onboarding, permissions, connections, health and exceptions—not a replacement CRM.
 
-**Status:** Phase 1 account/CRM backend deployed by the owner; the new Executive runtime is available locally and awaits owner deployment. MFA is excluded as requested; frontend hosting is Vercel. Includes Firebase email/password sign-in and verification, owner-issued invitations, editable technician permissions, a basic demo CRM (customers, properties, scheduled jobs, notes and repair requests), exact-action approvals and Firestore receipts. The OpenAI Agents SDK Executive is available locally through the Assistant screen. SMS, voice and external CRM integrations are not connected.
+**Status:** Firebase account/CRM backend and the OpenAI Agents SDK Executive are deployed, with the frontend hosted on Vercel at https://www.ghostai.dev. This change adds the company-specific Twilio SMS adapter, assisted operator onboarding, phone verification, consent/STOP/HELP handling, durable messaging and delivery tracking; deploy these new functions and connect an approved number before live texting. MFA is excluded as requested. Voice, MMS processing and external CRM integrations remain future work.
 
 ## Run the local AI assistant
 
@@ -60,7 +60,7 @@ The earlier Python prototype remains available with `python3 -m ghostai.server` 
 - [Legacy Phase 0 Python prototype](docs/PROTOTYPE.md)
 - [Product scope and experience](docs/PRODUCT.md)
 - [Executive runtime and integration boundaries](docs/EXECUTIVE.md)
-- [Public policies, consent and Twilio verification](docs/TWILIO_SETUP.md)
+- [SMS onboarding, consent and operations](docs/TWILIO_SETUP.md)
 - [System architecture](docs/ARCHITECTURE.md)
 - [Firebase architecture decision](docs/FIREBASE.md)
 - [Gateway, identity and security](docs/SECURITY_GATEWAY.md)

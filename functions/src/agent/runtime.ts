@@ -116,7 +116,12 @@ export class ExecutiveRuntime {
       return { turns: result };
     });
   }
-  async turn(identity: Identity, tenant: string, input: unknown) {
+  async turn(
+    identity: Identity,
+    tenant: string,
+    input: unknown,
+    channelGuard?: () => Promise<void>,
+  ) {
     assert(identity.verified, "Verify your email to use the assistant.");
     const data = inputSchema.parse(input);
     const ref = this.conversation(tenant, identity.uid, data.conversationId);
@@ -198,6 +203,7 @@ export class ExecutiveRuntime {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 50000);
     const verify = async () => {
+      await channelGuard?.();
       assert(
         !controller.signal.aborted && Date.now() < deadline,
         "The assistant reached its time limit.",

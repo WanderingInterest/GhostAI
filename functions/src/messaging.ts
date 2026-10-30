@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import policy from "./messaging-policy.json";
+import { smsPolicy } from "./sms";
 import { assert, id, Identity } from "./contracts";
 import { Service } from "./service";
 
@@ -10,7 +10,7 @@ const inputSchema = z.discriminatedUnion("action", [
       action: z.literal("opt_in"),
       key: id,
       phone: z.string().regex(/^\+[1-9]\d{7,14}$/),
-      version: z.literal(policy.version),
+      version: z.string().min(1).max(80),
       agreed: z.literal(true),
       expectedRevision: z.number().int().min(0),
     })
@@ -28,7 +28,11 @@ export class MessagingConsent {
   private ref(tenant: string, uid: string) {
     return this.service.org(tenant).collection("messagingConsents").doc(uid);
   }
-  private view(data: Record<string, any> | undefined) {
+  private view(
+    data: Record<string, any> | undefined,
+    program?: Record<string, any>,
+  ) {
+    const policy = smsPolicy(program);
     return {
       status: data?.status ?? "not_enrolled",
       phone: data?.phone ?? "",
@@ -38,15 +42,25 @@ export class MessagingConsent {
       version: data?.version ?? null,
       // Consent is not phone ownership. Twilio enrollment must perform its own
       // verification and check current consent immediately before every dispatch.
-      phoneVerified: false,
-      smsEnabled: false,
+      phoneVerified: data?.phoneVerified === true && data?.status === "active",
+      smsEnabled:
+        program?.enabled === true &&
+        data?.status === "active" &&
+        data?.version === policy.version,
+      number: program?.phone ?? null,
       policy,
     };
   }
   async status(identity: Identity, tenant: string) {
     return this.service.db.runTransaction(async (tx) => {
       await this.service.membership(tx, tenant, identity.uid);
-      return this.view((await tx.get(this.ref(tenant, identity.uid))).data());
+      const [consent, program] = await Promise.all([
+        tx.get(this.ref(tenant, identity.uid)),
+        tx.get(
+          this.service.org(tenant).collection("settings").doc("messaging"),
+        ),
+      ]);
+      return this.view(consent.data(), program.data());
     });
   }
   async save(
@@ -67,23 +81,33 @@ export class MessagingConsent {
       event = ref.collection("events").doc(data.key);
     return this.service.db.runTransaction(async (tx) => {
       await this.service.membership(tx, tenant, identity.uid);
-      const [current, previous] = await Promise.all([
+      const [current, previous, configured] = await Promise.all([
         tx.get(ref),
         tx.get(event),
+        tx.get(
+          this.service.org(tenant).collection("settings").doc("messaging"),
+        ),
       ]);
+      const policy = smsPolicy(configured.data());
       if (previous.exists) {
         assert(
           previous.data()!.digest === digest,
           "This preference request was used for different details.",
           409,
         );
-        return this.view(current.data());
+        return this.view(current.data(), configured.data());
       }
       assert(
         (current.data()?.revision ?? 0) === data.expectedRevision,
         "Your SMS preferences changed. Refresh before saving.",
         409,
       );
+      if (data.action === "opt_in")
+        assert(
+          data.version === policy.version,
+          "SMS terms changed. Refresh before saving.",
+          409,
+        );
       const at = Date.now(),
         revision = data.expectedRevision + 1;
       const next =
@@ -104,7 +128,12 @@ export class MessagingConsent {
               version: current.data()?.version ?? policy.version,
               revision,
             };
-      tx.set(ref, { ...next, actorId: identity.uid, updatedAt: at });
+      tx.set(ref, {
+        ...next,
+        phoneVerified: false,
+        actorId: identity.uid,
+        updatedAt: at,
+      });
       tx.create(event, {
         ...next,
         digest,
@@ -132,7 +161,7 @@ export class MessagingConsent {
         `messaging.${data.action}`,
         event.id,
       );
-      return this.view(next);
+      return this.view(next, configured.data());
     });
   }
 }

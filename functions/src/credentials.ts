@@ -20,18 +20,20 @@ export type Connection = {
   updatedAt: number | null;
   message: string | null;
 };
-const context = (tenant: string) => `ghostai:v1:${tenant}:openai`;
+const context = (tenant: string, provider: string) =>
+  `ghostai:v1:${tenant}:${provider}`;
 export function encryptKey(
   key: string,
   master: string,
   tenant: string,
+  provider = "openai",
 ): SealedKey {
   id.parse(tenant);
   const bytes = Buffer.from(master, "base64");
   assert(bytes.length === 32, "Credential storage is not configured.", 503);
   const iv = randomBytes(12),
     cipher = createCipheriv("aes-256-gcm", bytes, iv);
-  cipher.setAAD(Buffer.from(context(tenant)));
+  cipher.setAAD(Buffer.from(context(tenant, provider)));
   const encrypted = Buffer.concat([cipher.update(key, "utf8"), cipher.final()]);
   return {
     format: 1,
@@ -44,6 +46,7 @@ export function decryptKey(
   value: SealedKey,
   master: string,
   tenant: string,
+  provider = "openai",
 ): string {
   id.parse(tenant);
   assert(value.format === 1, "Credential format is unsupported.", 503);
@@ -54,7 +57,7 @@ export function decryptKey(
     bytes,
     Buffer.from(value.iv, "base64"),
   );
-  cipher.setAAD(Buffer.from(context(tenant)));
+  cipher.setAAD(Buffer.from(context(tenant, provider)));
   cipher.setAuthTag(Buffer.from(value.tag, "base64"));
   return Buffer.concat([
     cipher.update(Buffer.from(value.ciphertext, "base64")),

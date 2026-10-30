@@ -53,7 +53,7 @@ try {
 }
 await firebase.deploy({
   project,
-  only: "functions:api,firestore:rules,firestore:indexes",
+  only: "functions:api,functions:twilioWebhook,functions:smsIncoming,functions:smsOutgoing,firestore:rules,firestore:indexes",
   config: "firebase.json",
 });
 console.log(

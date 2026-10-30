@@ -8,6 +8,9 @@ import { onRequest } from "firebase-functions/v2/https";
 import { z } from "zod";
 import { Service } from "./service";
 import { ExecutiveRuntime } from "./agent/runtime";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { Sms } from "./sms";
+import twilio from "twilio";
 import { MessagingConsent } from "./messaging";
 import { AppError, assert, Identity, id } from "./contracts";
 initializeApp();
@@ -20,6 +23,14 @@ const credentials = new Credentials(service, () =>
 );
 const executive = new ExecutiveRuntime(service, credentials);
 const messaging = new MessagingConsent(service);
+const sms = new Sms(
+  service,
+  () =>
+    process.env.FUNCTIONS_EMULATOR === "true"
+      ? createHash("sha256").update("ghostai-emulator-only").digest("base64")
+      : vaultKey.value(),
+  executive,
+);
 export const api = onRequest(
   {
     region: "us-central1",
@@ -97,6 +108,29 @@ export const api = onRequest(
         return;
       }
       assert(identity.verified, "Verify your email to continue.");
+      const smsConnection = path.match(
+        /^\/orgs\/([a-zA-Z0-9_-]+)\/connections\/twilio(?:\/(disconnect))?$/,
+      );
+      if (smsConnection) {
+        const [, tenant, action] = smsConnection;
+        if (req.method === "GET" && !action)
+          res.json(await sms.status(identity, tenant));
+        else if (req.method === "POST" && action === "disconnect") {
+          z.object({}).strict().parse(body);
+          res.json(await sms.disconnect(identity, tenant));
+        } else if (req.method === "POST" && !action) {
+          res.json(await sms.connect(identity, tenant, body));
+        } else throw new AppError(404, "Not found.");
+        return;
+      }
+      const verifyPhone = path.match(
+        /^\/orgs\/([a-zA-Z0-9_-]+)\/messaging-verification$/,
+      );
+      if (verifyPhone && req.method === "POST") {
+        z.object({}).strict().parse(body);
+        res.json(await sms.verification(identity, verifyPhone[1]));
+        return;
+      }
       const consent = path.match(
         /^\/orgs\/([a-zA-Z0-9_-]+)\/messaging-consent$/,
       );
@@ -248,5 +282,80 @@ export const api = onRequest(
         .status(500)
         .json({ error: "We could not save this change. Please try again." });
     }
+  },
+);
+
+// Public provider entrypoint: Firebase bearer auth is deliberately not used here.
+// Every request is authenticated with Twilio's signature against the canonical URL.
+export const twilioWebhook = onRequest(
+  {
+    region: "us-central1",
+    invoker: "public",
+    secrets: [vaultKey],
+    timeoutSeconds: 15,
+    maxInstances: 10,
+  },
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      assert(
+        req.method === "POST" && req.is("application/x-www-form-urlencoded"),
+        "Use a Twilio POST webhook.",
+        415,
+      );
+      assert(req.rawBody.length <= 32768, "Request too large.", 413);
+      const path = req.path.match(
+        /^\/([a-zA-Z0-9_-]+)\/(inbound|status)(?:\/(SM[a-fA-F0-9]{32}))?$/,
+      );
+      assert(
+        path && (path[2] === "status" ? !!path[3] : !path[3]),
+        "Not found.",
+        404,
+      );
+      const params = z.record(z.string(), z.string()).parse(req.body);
+      const signature = req.get("X-Twilio-Signature") ?? "";
+      const response = new twilio.twiml.MessagingResponse();
+      if (path[2] === "inbound") {
+        const help = await sms.inbound(path[1], params, signature);
+        if (help) response.message(help);
+      } else await sms.callback(path[1], path[3], params, signature);
+      res.type("text/xml").status(200).send(response.toString());
+    } catch (error) {
+      res
+        .status(
+          error instanceof AppError
+            ? error.status
+            : error instanceof z.ZodError
+              ? 400
+              : 500,
+        )
+        .send("Webhook could not be accepted.");
+    }
+  },
+);
+export const smsIncoming = onDocumentCreated(
+  {
+    document: "organizations/{tenant}/smsInbox/{messageId}",
+    region: "us-central1",
+    secrets: [vaultKey],
+    timeoutSeconds: 120,
+    retry: false,
+    maxInstances: 10,
+  },
+  async (event) => {
+    await sms.process(event.params.tenant, event.params.messageId);
+  },
+);
+export const smsOutgoing = onDocumentCreated(
+  {
+    document: "organizations/{tenant}/smsOutbox/{messageId}",
+    region: "us-central1",
+    secrets: [vaultKey],
+    timeoutSeconds: 30,
+    retry: false,
+    maxInstances: 10,
+  },
+  async (event) => {
+    await sms.dispatch(event.params.tenant, event.params.messageId);
   },
 );

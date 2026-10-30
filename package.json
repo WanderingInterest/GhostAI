@@ -18,7 +18,9 @@
     "dev:emulator": "NEXT_PUBLIC_USE_EMULATORS=true npm run dev",
     "deploy:backend": "node scripts/deploy-backend.mjs",
     "setup:assistant": "node scripts/configure-local-openai.mjs",
-    "demo:assistant": "node scripts/local-assistant.mjs"
+    "demo:assistant": "node scripts/local-assistant.mjs",
+    "setup:twilio": "npm run build --workspace functions && node scripts/configure-twilio.mjs",
+    "test:sms": "npm run build --workspace functions && firebase emulators:exec --project demo-ghostai --only auth,firestore 'node --test --test-concurrency=1 --test-name-pattern=\"SMS transport|SMS consent|credential|Twilio onboarding\" functions/test/integration.test.mjs'"
   },
   "engines": {
     "node": "24.x"

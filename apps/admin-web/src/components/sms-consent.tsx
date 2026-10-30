@@ -14,6 +14,10 @@ type Consent = {
   consentedAt: number | null;
   withdrawnAt: number | null;
   version: string | null;
+  smsEnabled: boolean;
+  phoneVerified: boolean;
+  number: string | null;
+  policy: typeof policy;
 };
 export function SmsConsent() {
   const [user, setUser] = useState<User | null>(null);
@@ -26,6 +30,10 @@ export function SmsConsent() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [verification, setVerification] = useState<{
+    number: string;
+    text: string;
+  } | null>(null);
   const pending = useRef<{ digest: string; body: object } | null>(null);
   const saving = useRef(false);
   useEffect(() => {
@@ -83,6 +91,7 @@ export function SmsConsent() {
     if (!tenant) return;
     let current = true;
     setConsent(null);
+    setVerification(null);
     setAgreed(false);
     setNotice("");
     setError("");
@@ -101,7 +110,13 @@ export function SmsConsent() {
       current = false;
     };
   }, [tenant]);
-  const enrolled = consent?.status === "consented_pending_verification";
+  const program = consent?.policy ?? policy;
+  const termsChanged =
+    !!consent?.version && consent.version !== program.version;
+  const enrolled =
+    !termsChanged &&
+    (consent?.status === "consented_pending_verification" ||
+      consent?.status === "active");
   async function save(action: "opt_in" | "withdraw", event?: FormEvent) {
     event?.preventDefault();
     if (!consent || !tenant || saving.current) return;
@@ -120,7 +135,7 @@ export function SmsConsent() {
             action,
             phone: phone.trim(),
             agreed: true,
-            version: policy.version,
+            version: program.version,
             expectedRevision: consent.revision,
           }
         : { action, expectedRevision: consent.revision };
@@ -140,13 +155,14 @@ export function SmsConsent() {
         body,
       );
       setConsent(value);
+      setVerification(null);
       setPhone(value.phone);
       setAgreed(false);
       pending.current = null;
       setNotice(
         value.status === "withdrawn"
           ? "SMS consent withdrawn. Your web account is unchanged."
-          : "Your consent is recorded. Texting will remain off until phone verification and SMS setup are complete.",
+          : "Your consent is recorded. Verify your phone to start texting.",
       );
     } catch (e) {
       setError(
@@ -162,10 +178,14 @@ export function SmsConsent() {
   return (
     <div className="sms-enrollment">
       <div className="sms-program-heading">
-        <h2>{policy.program}</h2>
+        <h2>{program.program}</h2>
         <p>
-          {policy.sender}
-          {smsNumber ? ` · ${smsNumber}` : ""}
+          {program.sender}
+          {consent?.number
+            ? ` · ${consent.number}`
+            : smsNumber
+              ? ` · ${smsNumber}`
+              : ""}
         </p>
       </div>
       <p>
@@ -237,16 +257,105 @@ export function SmsConsent() {
           <CheckCircle2 size={17} /> {notice}
         </div>
       )}
+      {termsChanged && (
+        <p className="form-notice">
+          Your company’s SMS program changed. Review the current disclosure and
+          opt in again to continue texting.
+        </p>
+      )}
       {enrolled && (
         <div className="sms-saved">
-          <h3>Consent recorded</h3>
+          <h3>{consent.smsEnabled ? "SMS is active" : "Consent recorded"}</h3>
           <p>
             {consent.phone} ·{" "}
             {consent.consentedAt
               ? new Date(consent.consentedAt).toLocaleDateString()
               : ""}
           </p>
-          <p>Phone verification pending. SMS is not active yet.</p>
+          {consent.smsEnabled ? (
+            <p>
+              Text your job questions and service notes to {consent.number}.
+            </p>
+          ) : (
+            <>
+              <p>
+                {consent.phoneVerified
+                  ? "Your phone is verified. Your company’s SMS connection needs attention."
+                  : "Verify your phone before texting the assistant."}
+              </p>
+              <button
+                className="button primary"
+                disabled={busy || !consent.number}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    setVerification(
+                      await api(`/orgs/${tenant}/messaging-verification`, {}),
+                    );
+                  } catch (e) {
+                    setError(
+                      e instanceof Error
+                        ? e.message
+                        : "Could not start verification.",
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Verify my phone
+              </button>
+              {verification && (
+                <div className="form-notice" role="status">
+                  <p>
+                    From {consent.phone}, text{" "}
+                    <strong>{verification.text}</strong> to{" "}
+                    <strong>{verification.number}</strong> within 10 minutes.
+                  </p>
+                  <a
+                    className="button secondary"
+                    href={`sms:${verification.number}?body=${encodeURIComponent(verification.text)}`}
+                  >
+                    Open text message
+                  </a>{" "}
+                  <button
+                    className="button secondary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setError("");
+                      try {
+                        const value = await api<Consent>(
+                          `/orgs/${tenant}/messaging-consent`,
+                        );
+                        setConsent(value);
+                        if (value.smsEnabled) {
+                          setVerification(null);
+                          setNotice(
+                            "Phone verified. You can text the assistant now.",
+                          );
+                        } else
+                          setNotice(
+                            "Not verified yet. Send the exact message from your enrolled phone, then check again.",
+                          );
+                      } catch (e) {
+                        setError(
+                          e instanceof Error
+                            ? e.message
+                            : "Could not check verification.",
+                        );
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    I sent it — check status
+                  </button>
+                </div>
+              )}
+            </>
+          )}
           <button
             className="button secondary"
             disabled={busy}
@@ -262,79 +371,82 @@ export function SmsConsent() {
           again.
         </p>
       )}
-      <form
-        onSubmit={(event) => save("opt_in", event)}
-        className="sms-consent-form"
-      >
-        <label className="field" htmlFor="sms-phone">
-          <span>Your mobile number</span>
-          <input
-            id="sms-phone"
-            name="phone"
-            type="tel"
-            autoComplete="tel"
-            placeholder="+16025550123"
-            value={phone}
-            onChange={(event) => {
-              setPhone(event.target.value.replace(/[\s().-]/g, ""));
-              setAgreed(false);
-            }}
-            pattern="\+[1-9][0-9]{7,14}"
-            maxLength={16}
-            disabled={busy}
-            aria-describedby="sms-phone-help"
-          />
-        </label>
-        <p className="helper" id="sms-phone-help">
-          Include your country code, with no spaces (for example, +16025550123).
-          Enter only a number you control. This does not verify ownership.
-        </p>
-        <label className="sms-opt-in">
-          <input
-            type="checkbox"
-            name="smsConsent"
-            checked={agreed}
-            onChange={(event) => setAgreed(event.target.checked)}
-            disabled={busy}
-          />
-          <span>{policy.disclosure}</span>
-        </label>
-        <p className="sms-policy-links">
-          Read our{" "}
-          <Link href="/terms#sms" target="_blank" rel="noopener noreferrer">
-            Terms & Conditions
-          </Link>{" "}
-          and{" "}
-          <Link href="/privacy" target="_blank" rel="noopener noreferrer">
-            Privacy Policy
-          </Link>
-          . <Link href="/support">Contact support</Link>.
-        </p>
-        <button
-          className="button primary"
-          type="submit"
-          disabled={
-            busy ||
-            !user?.emailVerified ||
-            !tenant ||
-            !consent ||
-            !agreed ||
-            !phone.trim()
-          }
+      {!enrolled && (
+        <form
+          onSubmit={(event) => save("opt_in", event)}
+          className="sms-consent-form"
         >
-          {busy ? (
-            <>
-              <LoaderCircle className="spin" size={16} /> Saving…
-            </>
-          ) : (
-            "Save my SMS consent"
-          )}
-        </button>
-        <p className="helper">
-          Only you can opt in for your account. Your company administrator
-          cannot consent for you.
-        </p>
-      </form>
+          <label className="field" htmlFor="sms-phone">
+            <span>Your mobile number</span>
+            <input
+              id="sms-phone"
+              name="phone"
+              type="tel"
+              autoComplete="tel"
+              placeholder="+16025550123"
+              value={phone}
+              onChange={(event) => {
+                setPhone(event.target.value.replace(/[\s().-]/g, ""));
+                setAgreed(false);
+              }}
+              pattern="\+[1-9][0-9]{7,14}"
+              maxLength={16}
+              disabled={busy}
+              aria-describedby="sms-phone-help"
+            />
+          </label>
+          <p className="helper" id="sms-phone-help">
+            Include your country code, with no spaces (for example,
+            +16025550123). Enter only a number you control. This does not verify
+            ownership.
+          </p>
+          <label className="sms-opt-in">
+            <input
+              type="checkbox"
+              name="smsConsent"
+              checked={agreed}
+              onChange={(event) => setAgreed(event.target.checked)}
+              disabled={busy}
+            />
+            <span>{program.disclosure}</span>
+          </label>
+          <p className="sms-policy-links">
+            Read our{" "}
+            <Link href="/terms#sms" target="_blank" rel="noopener noreferrer">
+              Terms & Conditions
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" target="_blank" rel="noopener noreferrer">
+              Privacy Policy
+            </Link>
+            . <Link href="/support">Contact support</Link>.
+          </p>
+          <button
+            className="button primary"
+            type="submit"
+            disabled={
+              busy ||
+              !user?.emailVerified ||
+              !tenant ||
+              !consent ||
+              !agreed ||
+              !phone.trim()
+            }
+          >
+            {busy ? (
+              <>
+                <LoaderCircle className="spin" size={16} /> Saving…
+              </>
+            ) : (
+              "Save my SMS consent"
+            )}
+          </button>
+          <p className="helper">
+            Only you can opt in for your account. Your company administrator
+            cannot consent for you.
+          </p>
+        </form>
+      )}
     </div>
   );
 }

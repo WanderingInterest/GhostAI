@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GhostAI · Prototype</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><span class="ghost">G</span><div>GhostAI<small>WANDERING INTEREST</small></div></div><span class="badge">PHASE 0 · LOCAL PROTOTYPE</span></header>
+<main>
+<section class="intro"><p class="eyebrow">YOUR TEAM. YOUR RULES.</p><h1>Less busywork.<br>More work done.</h1><p>Enroll your team, set their access, and try a verified business operation.</p></section>
+<aside class="notice">Local simulation · Notes are saved here. CRM requests use a fake connector. SMS, voice, and AI are not connected.</aside>
+<div id="message" role="status" aria-live="polite"></div>
+<section class="card" id="accounts"><h2>Workspace access</h2><div class="grid"><form id="company-form"><label>New company<input name="name" required maxlength="120" placeholder="Desert Pool Care"></label><button>Create local company</button></form><form id="login-form"><label>Owner or technician access code<input name="code" type="password" autocomplete="off" required placeholder="Paste your prototype access code"></label><button class="secondary">Open workspace</button></form></div><label>Saved demo identities<select id="identity"><option value="">Choose an identity</option></select></label><p class="muted">Access codes are demo credentials stored in this browser. Use test data only. Codes expire after 24 hours.</p></section>
+<div id="workspace" hidden>
+<div class="workspace-title"><div><p class="eyebrow" id="role"></p><h2 id="company-name"></h2></div><button class="secondary" id="refresh">Refresh</button></div>
+<div class="grid">
+<section class="card"><p class="eyebrow">WORKBENCH</p><h2>Try an operation</h2><p class="muted">This structured workbench exercises the same Gateway contract a future phone assistant will use.</p><form id="operation-form"><label>Operation<select name="operation_id" id="operation"></select></label><label>Property / job<select name="job_id" id="job"></select></label><label id="text-label">Note or repair request<textarea name="text" maxlength="2000" placeholder="Finished service. Found a leaking valve."></textarea></label><label>Idempotency key<input name="idempotency_key" id="request-key" maxlength="120" required></label><button id="run">Run through Gateway</button><button type="button" class="secondary" id="new-key">New request key</button></form><pre id="result" aria-live="polite">Your receipt will appear here.</pre></section>
+<section class="card" id="enrollment"><p class="eyebrow">OWNER CONTROLS</p><h2 id="staff-heading">Enroll a technician</h2><form id="staff-form"><label>Technician name<input name="name" required maxlength="120" placeholder="Alex Rivera"></label><fieldset><legend>Permissions</legend><p class="muted">Off denies access. Assigned limits access to selected jobs. Own limits note reads to notes they authored on assigned jobs. All covers this company only.</p><div id="permissions"></div></fieldset><fieldset><legend>Assigned jobs</legend><div id="assignments"></div></fieldset><label class="check"><input name="active" type="checkbox" checked> Active employee</label><button id="save-staff">Enroll technician</button><button type="button" class="secondary" id="cancel-edit" hidden>Cancel edit</button></form><div id="access-code" hidden><p>Copy this technician’s access code. It is shown once:</p><code id="issued-code"></code></div><h3>Your team</h3><div id="staff-list"></div></section>
+</div>
+<div class="grid"><section class="card" id="approval-card"><p class="eyebrow">EXACT ACTION APPROVALS</p><h2>Owner inbox</h2><p class="muted">Fake CRM writes always require owner approval, even when the technician has permission.</p><div id="approvals"></div></section><section class="card"><p class="eyebrow">VERIFIED OUTCOMES</p><h2>Recent receipts</h2><div id="receipts"></div></section></div>
+<section class="card" id="audit-card"><h2>Audit trail</h2><div id="audit"></div></section>
+</div>
+<footer>GhostAI / Phase 0 · Native notes + fake CRM · Customer-controlled permissions</footer>
+</main></body></html>

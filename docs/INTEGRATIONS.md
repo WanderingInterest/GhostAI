@@ -69,5 +69,8 @@ Customer creates own API project, sets payment method and project limits, issues
 ## First connector decision
 Start with `business_note.create` (native) and ONE external provider, selected based on live access and pilot demand. Pool Boy may be best for proving end-to-end control quickly; Jobber is commercially attractive but has separate app approval requirements when connecting more accounts. Do not block core launch on Jobber. Build conformance tests with a fake connector before either provider.
 
+## Shared result contract
+Adapters normalize to `verified_persisted`, `provider_accepted`, `pending_confirmation`, `rejected`, or `failed` as defined in `ghostai/contracts.py`. Provider acceptance is not persisted verification. Phase 0 implements native notes and a clearly labeled local fake CRM; no live provider is connected. See [Prototype guide](PROTOTYPE.md).
+
 ## Provider certification tests
 Auth expiry/revocation; field and scope restrictions; pagination/cursor; schema changes; idempotency; no-write mock mode; rate-limit and retry policy; write-then-read verification; ambiguous outcome; API outage; permission changes; tenant-specific error isolation.

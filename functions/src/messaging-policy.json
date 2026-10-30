@@ -1,0 +1,11 @@
+{
+  "version": "2026-10-29",
+  "operator": "Wandering Interest",
+  "brand": "GhostAI",
+  "program": "GhostAI Technician Assistant",
+  "sender": "GhostAI by Wandering Interest",
+  "disclosure": "I agree to receive automated SMS text messages from GhostAI by Wandering Interest for my enrolled company, including replies to my requests, job information, service-note confirmations, and repair-approval updates. Message frequency varies based on my activity. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is optional and is not a condition of purchase, account creation, or using the web app.",
+  "privacyPath": "/privacy",
+  "termsPath": "/terms",
+  "consentPath": "/sms"
+}

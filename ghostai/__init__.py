@@ -1,0 +1,1 @@
+"""GhostAI local functional prototype."""

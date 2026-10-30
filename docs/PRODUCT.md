@@ -16,7 +16,7 @@
 ## V1 usable experiences
 1. Employee SMS two-way conversation, with company-owned Twilio number; receive/deliver webhooks safely.
 2. Inbound phone call to AI, using live speech and the **same Gateway tools** as SMS.
-3. Staff enrollment, role/policy assignment and phone verification; owner signs in with stronger auth.
+3. Staff enrollment with owner-configurable operation permissions and own/assigned/company-wide record scopes, editable after enrollment; phone verification and stronger owner authentication. Owners cannot lower global risk or approval requirements.
 4. Business profile/FAQ, basic internal request and task logging, simple lookups even without CRM.
 5. Optional first CRM connector with limited, *verified* read and write operations (choose pilot integration according to access and demand; do not hard-code Jobber).
 6. Owner-facing setup, approval inbox, receipts/audit timeline, connection health and usage visibility.

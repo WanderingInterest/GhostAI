@@ -1,0 +1,7 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Attachments remain unavailable until private upload/download is implemented.
+    match /{path=**} { allow read, write: if false; }
+  }
+}

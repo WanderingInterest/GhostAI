@@ -683,7 +683,7 @@ export default function Home() {
               </div>
             )}
           </div>
-          <small className="auth-footer">GhostAI by Wandering Interest</small>
+          <small className="auth-footer">ghostai.dev · By Wandering Interest</small>
           <PolicyLinks />
         </main>
       </div>
@@ -1610,7 +1610,7 @@ export default function Home() {
           )}
           <footer className="page-footer">
             <span>
-              <Ghost size={14} />A little less busywork.
+              <Ghost size={14} />ghostai.dev · A little less busywork.
             </span>
             <PolicyLinks />
           </footer>

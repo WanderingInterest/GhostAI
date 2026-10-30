@@ -140,6 +140,9 @@ emails use Firebase’s real email service. The local demo accounts do not trans
 
 ## Vercel deployment
 
+Primary frontend: `https://www.ghostai.dev`. Allow that exact origin in the backend
+configuration; `https://ghostai.dev` is also retained for apex-domain access.
+
 - Root Directory: `apps/admin-web`; Framework: Next.js; Node: 24.
 - Enable **Include source files outside of the Root Directory in the Build Step**.
   The public messaging policy JSON is shared with the Functions workspace.
